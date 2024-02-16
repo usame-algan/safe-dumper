@@ -1,0 +1,27 @@
+{
+  "name": "safe-dump",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@rainbow-me/rainbowkit": "^2.0.0",
+    "@tanstack/react-query": "^5.18.1",
+    "next": "^14.0.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "viem": "^2.7.3",
+    "wagmi": "^2.5.5"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.3",
+    "@types/react": "^18.2.43",
+    "eslint": "^8.15.0",
+    "eslint-config-next": "^14.0.4",
+    "typescript": "^5.0.4"
+  }
+}
