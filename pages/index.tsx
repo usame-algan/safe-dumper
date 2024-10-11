@@ -1,84 +1,219 @@
-import { ConnectButton } from '@rainbow-me/rainbowkit';
-import type { NextPage } from 'next';
-import Head from 'next/head';
-import styles from '../styles/Home.module.css';
+import { useEffect, useState } from 'react'
+import { ConnectButton } from '@rainbow-me/rainbowkit'
+import type { NextPage } from 'next'
+import Safe, { encodeMultiSendData, getMultiSendCallOnlyContract } from '@safe-global/protocol-kit'
+import { getMultiSendCallOnlyDeployment } from '@safe-global/safe-deployments'
+import Head from 'next/head'
+import { getOwnedSafes, getSafeOverviews, SafeOverview } from '@safe-global/safe-gateway-typescript-sdk'
+import { useAccount } from 'wagmi'
+
+import styles from '../styles/Home.module.css'
+import { Button, Checkbox, List, ListItemButton, ListItemIcon, ListItemText, Stack, Typography } from '@mui/material'
+import { blo } from 'blo'
+import Image from 'next/image'
+import { createEthersAdapter, useEthersProvider } from '../components/utils'
 
 const Home: NextPage = () => {
+  const [ownedSafes, setOwnedSafes] = useState<SafeOverview[]>([])
+  const [ownedSafeAddresses, setOwnedSafeAddresses] = useState<string[]>([])
+  const [selectedSafeIndexes, setSelectedSafeIndexes] = useState<number[]>([])
+  const [loadedSafesIndex, setLoadedSafesIndex] = useState<number>(0)
+  const account = useAccount()
+  const provider = useEthersProvider({ chainId: account.chainId })
+
+  const onLoadMore = () => {
+    setLoadedSafesIndex((prev) => prev + 1)
+  }
+
+  useEffect(() => {
+    if (!account.chainId || !account.address) return
+
+    getOwnedSafes(account.chainId.toString(), account.address).then(({ safes }) => setOwnedSafeAddresses(safes))
+  }, [account.chainId, account.address])
+
+  useEffect(() => {
+    if (!account.chainId || !account.address) return
+
+    const startIndex = loadedSafesIndex * 10
+    const endIndex = startIndex + 10
+    const currentOwnedSafeAddresses = ownedSafeAddresses.slice(startIndex, endIndex)
+
+    const fetchOwnedSafes = async (chainId: string, account: string) => {
+      if (currentOwnedSafeAddresses.length === 0) return
+
+      const safesStrings = currentOwnedSafeAddresses.map((safe) => `${chainId}:${safe}` as `${number}:0x${string}`)
+      const safeOverviews = await getSafeOverviews(safesStrings, {
+        trusted: true,
+        exclude_spam: false,
+        currency: 'USD',
+        walletAddress: account,
+      })
+
+      setOwnedSafes((prev) => [...prev, ...safeOverviews])
+    }
+
+    fetchOwnedSafes(account.chainId.toString(), account.address)
+  }, [account.address, account.chainId, ownedSafeAddresses, loadedSafesIndex])
+
+  const onDump = async () => {
+    if (!provider || !account.address || !ownedSafes) return
+
+    try {
+      const safeTxs = await Promise.all(
+        selectedSafeIndexes.map(async (selectedSafeIndex) => {
+          const safeAddress = ownedSafes[selectedSafeIndex].address.value
+          const safeSdk = await Safe.create({ safeAddress, provider })
+
+          const safeTx = await safeSdk.createSwapOwnerTx({
+            oldOwnerAddress: account.address!,
+            newOwnerAddress: '0x0000000000000000000000000000000000000002',
+          })
+
+          const signedTx = await safeSdk.signTransaction(safeTx)
+
+          return {
+            operation: 0,
+            to: safeAddress,
+            value: '0',
+            data: await safeSdk.getEncodedTransaction(signedTx),
+          }
+        }),
+      )
+
+      const multiSendTx = encodeMultiSendData(safeTxs)
+
+      const multiSendContract = getMultiSendCallOnlyDeployment()
+
+      if (!multiSendContract) return
+
+      const ethersAdapter = await createEthersAdapter(provider)
+
+      const instance = await getMultiSendCallOnlyContract({
+        safeVersion: '1.3.0',
+        ethAdapter: ethersAdapter,
+      })
+
+      await instance.contract.connect(await provider.getSigner()).multiSend(multiSendTx)
+    } catch (e) {
+      console.log(e)
+    }
+  }
+
+  const handleToggle = (index: number) => async () => {
+    if (!account.chainId || !ownedSafes) return
+
+    const currentIndex = selectedSafeIndexes.indexOf(index)
+    const newChecked = [...selectedSafeIndexes]
+
+    // Element is toggled on
+    if (currentIndex === -1) {
+      newChecked.push(index)
+    } else {
+      newChecked.splice(currentIndex, 1)
+    }
+
+    setSelectedSafeIndexes(newChecked)
+  }
+
+  const toggleAll = () => {
+    if (!ownedSafes) return
+
+    setSelectedSafeIndexes((prev) => {
+      if (prev.length > 0) {
+        return []
+      } else {
+        const multisigSafeIndexes = ownedSafes
+          .map((safe, index) => (safe.threshold > 1 ? index : -1))
+          .filter((index) => index !== -1)
+
+        const allIndexes = Array.from({ length: ownedSafes.length }, (_, index) => index)
+        return allIndexes.filter((_, index) => !multisigSafeIndexes.includes(index))
+      }
+    })
+  }
+
+  const hasMoreSafes = loadedSafesIndex * 10 + 10 < ownedSafeAddresses.length
+
   return (
     <div className={styles.container}>
       <Head>
-        <title>RainbowKit App</title>
-        <meta
-          content="Generated by @rainbow-me/create-rainbowkit"
-          name="description"
-        />
-        <link href="/favicon.ico" rel="icon" />
+        <title>Safe Dump</title>
       </Head>
 
       <main className={styles.main}>
-        <ConnectButton />
+        <Stack gap={1} alignItems="center" mb={6} textAlign="center">
+          <Typography variant="h4" fontWeight="bold">
+            Safe Dump
+          </Typography>
+          <Typography mb={1}>A safe place to quickly get rid of all your 1/1 Safe Accounts</Typography>
+          <ConnectButton />
+        </Stack>
 
-        <h1 className={styles.title}>
-          Welcome to <a href="">RainbowKit</a> + <a href="">wagmi</a> +{' '}
-          <a href="https://nextjs.org">Next.js!</a>
-        </h1>
+        {account.address && ownedSafes && (
+          <div className={styles.wrapper}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2} flexWrap="wrap">
+              <Typography>
+                Safe Accounts on {account.chain?.name} ({ownedSafes.length})
+              </Typography>
+              <Stack direction="row" gap={1}>
+                <Button variant="outlined" size="small" onClick={toggleAll}>
+                  Toggle all
+                </Button>
 
-        <p className={styles.description}>
-          Get started by editing{' '}
-          <code className={styles.code}>pages/index.tsx</code>
-        </p>
+                <Button onClick={onDump} size="small" variant="contained" disabled={selectedSafeIndexes.length === 0}>
+                  Dump Safe(s)
+                </Button>
+              </Stack>
+            </Stack>
 
-        <div className={styles.grid}>
-          <a className={styles.card} href="https://rainbowkit.com">
-            <h2>RainbowKit Documentation &rarr;</h2>
-            <p>Learn how to customize your wallet connection flow.</p>
-          </a>
+            <List dense component="div" role="list" className={styles.list} disablePadding>
+              {ownedSafes.map((safe, index) => {
+                return (
+                  <ListItemButton
+                    key={index}
+                    role="listitem"
+                    onClick={handleToggle(index)}
+                    divider
+                    disabled={safe.threshold > 1}
+                  >
+                    <ListItemIcon>
+                      <Checkbox
+                        size="small"
+                        checked={selectedSafeIndexes.indexOf(index) !== -1}
+                        tabIndex={-1}
+                        disableRipple
+                      />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={
+                        <Stack direction="row" gap={1} alignItems="center">
+                          <Image
+                            alt={safe.address.value}
+                            src={blo(safe.address.value as `0x${string}`)}
+                            width={36}
+                            height={36}
+                            className={styles.identicon}
+                          />
+                          <div>
+                            <Typography className={styles.address}>{safe.address.value}</Typography>
+                            <Typography variant="body2" color="grey.700">
+                              {safe.fiatTotal} USD
+                            </Typography>
+                          </div>
+                        </Stack>
+                      }
+                    />
+                  </ListItemButton>
+                )
+              })}
+            </List>
 
-          <a className={styles.card} href="https://wagmi.sh">
-            <h2>wagmi Documentation &rarr;</h2>
-            <p>Learn how to interact with Ethereum.</p>
-          </a>
-
-          <a
-            className={styles.card}
-            href="https://github.com/rainbow-me/rainbowkit/tree/main/examples"
-          >
-            <h2>RainbowKit Examples &rarr;</h2>
-            <p>Discover boilerplate example RainbowKit projects.</p>
-          </a>
-
-          <a className={styles.card} href="https://nextjs.org/docs">
-            <h2>Next.js Documentation &rarr;</h2>
-            <p>Find in-depth information about Next.js features and API.</p>
-          </a>
-
-          <a
-            className={styles.card}
-            href="https://github.com/vercel/next.js/tree/canary/examples"
-          >
-            <h2>Next.js Examples &rarr;</h2>
-            <p>Discover and deploy boilerplate example Next.js projects.</p>
-          </a>
-
-          <a
-            className={styles.card}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-          >
-            <h2>Deploy &rarr;</h2>
-            <p>
-              Instantly deploy your Next.js site to a public URL with Vercel.
-            </p>
-          </a>
-        </div>
+            {hasMoreSafes && <Button onClick={onLoadMore}>Load more</Button>}
+          </div>
+        )}
       </main>
-
-      <footer className={styles.footer}>
-        <a href="https://rainbow.me" rel="noopener noreferrer" target="_blank">
-          Made with ❤️ by your frens at 🌈
-        </a>
-      </footer>
     </div>
-  );
-};
+  )
+}
 
-export default Home;
+export default Home
