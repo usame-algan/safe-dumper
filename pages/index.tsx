@@ -1,151 +1,79 @@
 import { useEffect, useState } from 'react'
+import { blo } from 'blo'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import type { NextPage } from 'next'
-import Safe, { encodeMultiSendData, getMultiSendCallOnlyContract } from '@safe-global/protocol-kit'
-import { getMultiSendCallOnlyDeployment } from '@safe-global/safe-deployments'
+import Image from 'next/image'
 import Head from 'next/head'
-import { getOwnedSafes, getSafeOverviews, SafeOverview } from '@safe-global/safe-gateway-typescript-sdk'
 import { useAccount } from 'wagmi'
+import { Button, Checkbox, List, ListItemButton, ListItemDecorator, Stack, Typography } from '@mui/joy'
+import SafeLogo from '../public/images/safe_logo.svg'
 
 import styles from '../styles/Home.module.css'
-import { Button, Checkbox, List, ListItemButton, ListItemIcon, ListItemText, Stack, Typography } from '@mui/material'
-import { blo } from 'blo'
-import Image from 'next/image'
-import { createEthersAdapter, useEthersProvider } from '../components/utils'
+import useFetchOwnedSafes from '../hooks/useFetchOwnedSafes'
+import ReviewDump from '../components/ReviewDump'
+
+const VISIBLE_SAFES = 10
 
 const Home: NextPage = () => {
-  const [ownedSafes, setOwnedSafes] = useState<SafeOverview[]>([])
-  const [ownedSafeAddresses, setOwnedSafeAddresses] = useState<string[]>([])
-  const [selectedSafeIndexes, setSelectedSafeIndexes] = useState<number[]>([])
+  const [selectedSafeAddresses, setSelectedSafeAddresses] = useState<Set<string>>(new Set())
   const [loadedSafesIndex, setLoadedSafesIndex] = useState<number>(0)
+  const [open, setOpen] = useState<boolean>(false)
   const account = useAccount()
-  const provider = useEthersProvider({ chainId: account.chainId })
+  const { data: ownedSafes, error, isPending } = useFetchOwnedSafes()
+
+  const visibleSafes = ownedSafes ? ownedSafes.safes.slice(0, VISIBLE_SAFES * loadedSafesIndex + VISIBLE_SAFES) : []
 
   const onLoadMore = () => {
     setLoadedSafesIndex((prev) => prev + 1)
   }
 
-  useEffect(() => {
-    if (!account.chainId || !account.address) return
-
-    getOwnedSafes(account.chainId.toString(), account.address).then(({ safes }) => setOwnedSafeAddresses(safes))
-  }, [account.chainId, account.address])
-
-  useEffect(() => {
-    if (!account.chainId || !account.address) return
-
-    const startIndex = loadedSafesIndex * 10
-    const endIndex = startIndex + 10
-    const currentOwnedSafeAddresses = ownedSafeAddresses.slice(startIndex, endIndex)
-
-    const fetchOwnedSafes = async (chainId: string, account: string) => {
-      if (currentOwnedSafeAddresses.length === 0) return
-
-      const safesStrings = currentOwnedSafeAddresses.map((safe) => `${chainId}:${safe}` as `${number}:0x${string}`)
-      const safeOverviews = await getSafeOverviews(safesStrings, {
-        trusted: true,
-        exclude_spam: false,
-        currency: 'USD',
-        walletAddress: account,
-      })
-
-      setOwnedSafes((prev) => [...prev, ...safeOverviews])
-    }
-
-    fetchOwnedSafes(account.chainId.toString(), account.address)
-  }, [account.address, account.chainId, ownedSafeAddresses, loadedSafesIndex])
-
-  const onDump = async () => {
-    if (!provider || !account.address || !ownedSafes) return
-
-    try {
-      const safeTxs = await Promise.all(
-        selectedSafeIndexes.map(async (selectedSafeIndex) => {
-          const safeAddress = ownedSafes[selectedSafeIndex].address.value
-          const safeSdk = await Safe.create({ safeAddress, provider })
-
-          const safeTx = await safeSdk.createSwapOwnerTx({
-            oldOwnerAddress: account.address!,
-            newOwnerAddress: '0x0000000000000000000000000000000000000002',
-          })
-
-          const signedTx = await safeSdk.signTransaction(safeTx)
-
-          return {
-            operation: 0,
-            to: safeAddress,
-            value: '0',
-            data: await safeSdk.getEncodedTransaction(signedTx),
-          }
-        }),
-      )
-
-      const multiSendTx = encodeMultiSendData(safeTxs)
-
-      const multiSendContract = getMultiSendCallOnlyDeployment()
-
-      if (!multiSendContract) return
-
-      const ethersAdapter = await createEthersAdapter(provider)
-
-      const instance = await getMultiSendCallOnlyContract({
-        safeVersion: '1.3.0',
-        ethAdapter: ethersAdapter,
-      })
-
-      await instance.contract.connect(await provider.getSigner()).multiSend(multiSendTx)
-    } catch (e) {
-      console.log(e)
-    }
-  }
-
-  const handleToggle = (index: number) => async () => {
+  const handleToggle = (address: string) => async () => {
     if (!account.chainId || !ownedSafes) return
 
-    const currentIndex = selectedSafeIndexes.indexOf(index)
-    const newChecked = [...selectedSafeIndexes]
-
-    // Element is toggled on
-    if (currentIndex === -1) {
-      newChecked.push(index)
-    } else {
-      newChecked.splice(currentIndex, 1)
-    }
-
-    setSelectedSafeIndexes(newChecked)
+    setSelectedSafeAddresses((prev) => {
+      const newSet = new Set(prev)
+      if (newSet.has(address)) {
+        newSet.delete(address)
+      } else {
+        newSet.add(address)
+      }
+      return newSet
+    })
   }
 
   const toggleAll = () => {
-    if (!ownedSafes) return
-
-    setSelectedSafeIndexes((prev) => {
-      if (prev.length > 0) {
-        return []
+    setSelectedSafeAddresses((prev) => {
+      if (prev.size > 0) {
+        return new Set()
       } else {
-        const multisigSafeIndexes = ownedSafes
-          .map((safe, index) => (safe.threshold > 1 ? index : -1))
-          .filter((index) => index !== -1)
-
-        const allIndexes = Array.from({ length: ownedSafes.length }, (_, index) => index)
-        return allIndexes.filter((_, index) => !multisigSafeIndexes.includes(index))
+        const newSet = new Set<string>()
+        visibleSafes.forEach((safe) => {
+          newSet.add(safe)
+        })
+        return newSet
       }
     })
   }
 
-  const hasMoreSafes = loadedSafesIndex * 10 + 10 < ownedSafeAddresses.length
+  useEffect(() => {
+    setLoadedSafesIndex(0)
+  }, [account.chainId])
+
+  const hasMoreSafes = ownedSafes && loadedSafesIndex * 10 + 10 < ownedSafes.safes.length
 
   return (
     <div className={styles.container}>
       <Head>
-        <title>Safe Dump</title>
+        <title>Safe Dumper</title>
       </Head>
 
       <main className={styles.main}>
         <Stack gap={1} alignItems="center" mb={6} textAlign="center">
-          <Typography variant="h4" fontWeight="bold">
-            Safe Dump
+          <Typography level="h1" variant="plain" display="flex" alignItems="center" gap={1}>
+            <Image src={SafeLogo} alt="" width={50} height={50} />
+            Safe Dumper
           </Typography>
-          <Typography mb={1}>A safe place to quickly get rid of all your 1/1 Safe Accounts</Typography>
+          <Typography mb={1}>Did you create too many Safes again?</Typography>
           <ConnectButton />
         </Stack>
 
@@ -153,62 +81,49 @@ const Home: NextPage = () => {
           <div className={styles.wrapper}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2} flexWrap="wrap">
               <Typography>
-                Safe Accounts on {account.chain?.name} ({ownedSafes.length})
+                Safe Accounts on {account.chain?.name} ({ownedSafes.safes.length})
               </Typography>
               <Stack direction="row" gap={1}>
-                <Button variant="outlined" size="small" onClick={toggleAll}>
+                <Button variant="outlined" size="sm" onClick={toggleAll}>
                   Toggle all
                 </Button>
 
-                <Button onClick={onDump} size="small" variant="contained" disabled={selectedSafeIndexes.length === 0}>
+                <Button
+                  onClick={() => setOpen(true)}
+                  size="sm"
+                  variant="solid"
+                  disabled={selectedSafeAddresses.size === 0}
+                >
                   Dump Safe(s)
                 </Button>
               </Stack>
             </Stack>
 
-            <List dense component="div" role="list" className={styles.list} disablePadding>
-              {ownedSafes.map((safe, index) => {
+            <List component="div" role="list" className={styles.list}>
+              {visibleSafes?.map((safe) => {
                 return (
-                  <ListItemButton
-                    key={index}
-                    role="listitem"
-                    onClick={handleToggle(index)}
-                    divider
-                    disabled={safe.threshold > 1}
-                  >
-                    <ListItemIcon>
-                      <Checkbox
-                        size="small"
-                        checked={selectedSafeIndexes.indexOf(index) !== -1}
-                        tabIndex={-1}
-                        disableRipple
+                  <ListItemButton key={safe} role="listitem" onClick={handleToggle(safe)} disabled={isPending}>
+                    <ListItemDecorator>
+                      <Checkbox size="sm" checked={selectedSafeAddresses.has(safe)} tabIndex={-1} />
+                    </ListItemDecorator>
+                    <Stack direction="row" gap={1} alignItems="center">
+                      <Image
+                        alt={safe}
+                        src={blo(safe as `0x${string}`)}
+                        width={36}
+                        height={36}
+                        className={styles.identicon}
                       />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={
-                        <Stack direction="row" gap={1} alignItems="center">
-                          <Image
-                            alt={safe.address.value}
-                            src={blo(safe.address.value as `0x${string}`)}
-                            width={36}
-                            height={36}
-                            className={styles.identicon}
-                          />
-                          <div>
-                            <Typography className={styles.address}>{safe.address.value}</Typography>
-                            <Typography variant="body2" color="grey.700">
-                              {safe.fiatTotal} USD
-                            </Typography>
-                          </div>
-                        </Stack>
-                      }
-                    />
+                      <div>
+                        <Typography className={styles.address}>{safe}</Typography>
+                      </div>
+                    </Stack>
                   </ListItemButton>
                 )
               })}
             </List>
-
             {hasMoreSafes && <Button onClick={onLoadMore}>Load more</Button>}
+            {open && <ReviewDump selectedSafes={selectedSafeAddresses} open={open} setOpen={setOpen} />}
           </div>
         )}
       </main>

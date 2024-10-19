@@ -41,6 +41,10 @@
   border-radius: 50%;
 }
 
+.disabled {
+  text-decoration: line-through;
+}
+
 @media (max-width: 600px) {
   .grid {
     width: 100%;

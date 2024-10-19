@@ -1,9 +1,9 @@
-import '../styles/globals.css';
-import '@rainbow-me/rainbowkit/styles.css';
-import type { AppProps } from 'next/app';
+import '../styles/globals.css'
+import '@rainbow-me/rainbowkit/styles.css'
+import type { AppProps } from 'next/app'
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { WagmiProvider } from 'wagmi';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { WagmiProvider } from 'wagmi'
 import {
   arbitrum,
   base,
@@ -12,8 +12,17 @@ import {
   polygon,
   sepolia,
   zora,
-} from 'wagmi/chains';
-import { getDefaultConfig, RainbowKitProvider } from '@rainbow-me/rainbowkit';
+  gnosis,
+  bsc,
+  linea,
+  scroll,
+  celo,
+  avalanche,
+  mantle,
+  aurora,
+  baseSepolia,
+} from 'wagmi/chains'
+import { getDefaultConfig, RainbowKitProvider } from '@rainbow-me/rainbowkit'
 
 const config = getDefaultConfig({
   appName: 'RainbowKit App',
@@ -25,12 +34,21 @@ const config = getDefaultConfig({
     arbitrum,
     base,
     zora,
+    gnosis,
+    bsc,
+    linea,
+    scroll,
+    celo,
+    avalanche,
+    mantle,
+    aurora,
+    baseSepolia,
     ...(process.env.NEXT_PUBLIC_ENABLE_TESTNETS === 'true' ? [sepolia] : []),
   ],
   ssr: true,
-});
+})
 
-const client = new QueryClient();
+const client = new QueryClient()
 
 function MyApp({ Component, pageProps }: AppProps) {
   return (
@@ -41,7 +59,7 @@ function MyApp({ Component, pageProps }: AppProps) {
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>
-  );
+  )
 }
 
-export default MyApp;
+export default MyApp
